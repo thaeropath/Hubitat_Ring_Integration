@@ -92,6 +92,20 @@ async function resolveLockUser(location: RingLocation, _state: string): Promise<
   return undefined;
 }
 
+// ── Smart Light (Ring Bridge-connected) ───────────────────────────────────────
+
+export async function handleLightOn(device: RingDevice, on: boolean): Promise<void> {
+  await sendEvent({ deviceId: device.id.toString(), type: 'switch', value: on ? 'on' : 'off' });
+  log.info(`Light "${device.name}" → ${on ? 'on' : 'off'}`);
+}
+
+export async function handleLightLevel(device: RingDevice, level: number): Promise<void> {
+  // Ring brightness is 0-100; Hubitat SwitchLevel expects 0-100
+  const clamped = Math.min(100, Math.max(0, Math.round(level)));
+  await sendEvent({ deviceId: device.id.toString(), type: 'level', value: clamped.toString() });
+  log.info(`Light "${device.name}" level → ${clamped}%`);
+}
+
 // ── Utility ───────────────────────────────────────────────────────────────────
 
 function delay(ms: number): Promise<void> {

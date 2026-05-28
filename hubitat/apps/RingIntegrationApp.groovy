@@ -126,6 +126,12 @@ def handleRingEvent() {
             child.sendEvent(name: "lock", value: value)
             if (lastUser) child.sendEvent(name: "lastUser", value: lastUser)
             break
+        case "switch":
+            child.sendEvent(name: "switch", value: value)
+            break
+        case "level":
+            child.sendEvent(name: "level", value: value.toInteger())
+            break
         default:
             log.warn "Unknown Ring event type: ${type}"
     }
@@ -219,6 +225,7 @@ private String driverForType(String type) {
         case "contact-sensor": return "Ring Contact Sensor"
         case "alarm":          return "Ring Alarm Controller"
         case "lock":           return "Ring Lock"
+        case "light":          return "Ring Smart Light"
         default:               return null
     }
 }

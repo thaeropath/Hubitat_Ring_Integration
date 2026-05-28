@@ -1,6 +1,6 @@
 import express, { Request, Response } from 'express';
 import { config } from './config';
-import { discoveredDevices, locationStore, lockStore } from './ring/client';
+import { discoveredDevices, lightStore, locationStore, lockStore } from './ring/client';
 import { log } from './logger';
 
 const app = express();
@@ -80,6 +80,58 @@ app.post('/devices/:id/disarm', async (req: Request, res: Response) => {
     res.json({ ok: true });
   } catch (err) {
     log.error(`Disarm command failed: ${err}`);
+    res.status(500).json({ error: 'Command failed' });
+  }
+});
+
+// ── Smart Light commands ──────────────────────────────────────────────────────
+
+type LightDevice = { setLightState(state: { on?: boolean; brightness?: number }): Promise<void> };
+
+app.post('/devices/:id/on', async (req: Request, res: Response) => {
+  const device = lightStore.get(req.params.id) as unknown as LightDevice | undefined;
+  if (!device) { res.status(404).json({ error: 'Device not found' }); return; }
+
+  try {
+    await device.setLightState({ on: true });
+    log.info(`Light on: ${req.params.id}`);
+    res.json({ ok: true });
+  } catch (err) {
+    log.error(`Light on failed: ${err}`);
+    res.status(500).json({ error: 'Command failed' });
+  }
+});
+
+app.post('/devices/:id/off', async (req: Request, res: Response) => {
+  const device = lightStore.get(req.params.id) as unknown as LightDevice | undefined;
+  if (!device) { res.status(404).json({ error: 'Device not found' }); return; }
+
+  try {
+    await device.setLightState({ on: false });
+    log.info(`Light off: ${req.params.id}`);
+    res.json({ ok: true });
+  } catch (err) {
+    log.error(`Light off failed: ${err}`);
+    res.status(500).json({ error: 'Command failed' });
+  }
+});
+
+app.post('/devices/:id/setLevel', async (req: Request, res: Response) => {
+  const device = lightStore.get(req.params.id) as unknown as LightDevice | undefined;
+  if (!device) { res.status(404).json({ error: 'Device not found' }); return; }
+
+  const level = Number((req.body as { level?: unknown }).level);
+  if (isNaN(level) || level < 0 || level > 100) {
+    res.status(400).json({ error: 'level must be 0-100' });
+    return;
+  }
+
+  try {
+    await device.setLightState({ on: level > 0, brightness: level });
+    log.info(`Light level ${level}%: ${req.params.id}`);
+    res.json({ ok: true });
+  } catch (err) {
+    log.error(`Light setLevel failed: ${err}`);
     res.status(500).json({ error: 'Command failed' });
   }
 });
