@@ -9,11 +9,16 @@ import { log } from '../logger';
 
 // Route ring-client-api internal logs through our logger so we can see
 // the socket.io host, connection errors, and other internal details.
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const { useLogger } = require('ring-client-api/lib/util') as { useLogger: (l: { logInfo: (...a: unknown[]) => void; logError: (...a: unknown[]) => void }) => void };
+// Use an absolute file path to bypass Node 12+ package exports restrictions.
+/* eslint-disable @typescript-eslint/no-require-imports */
+const ringLibDir = path.dirname(require.resolve('ring-client-api'));
+const { useLogger } = require(path.join(ringLibDir, 'util')) as {
+  useLogger: (l: { logInfo: (...a: unknown[]) => void; logError: (...a: unknown[]) => void }) => void;
+};
+/* eslint-enable @typescript-eslint/no-require-imports */
 useLogger({
-  logInfo:  (...args) => log.info(`[ring-client-api] ${args.join(' ')}`),
-  logError: (...args) => log.warn(`[ring-client-api] ${args.join(' ')}`),
+  logInfo:  (...args) => log.info(`[ring] ${args.join(' ')}`),
+  logError: (...args) => log.warn(`[ring] ${args.join(' ')}`),
 });
 
 // Ring Bridge-connected light device types
