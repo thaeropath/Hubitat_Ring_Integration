@@ -1,0 +1,20 @@
+services:
+  ring-bridge:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "${BRIDGE_PORT:-3000}:3000"
+    env_file:
+      - .env
+    # Persist ring-client-api session data across container restarts
+    volumes:
+      - ring-data:/home/node
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  ring-data:

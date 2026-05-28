@@ -1,0 +1,21 @@
+[Unit]
+Description=Ring-Hubitat Bridge
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/opt/ring-bridge
+ExecStart=/usr/bin/node dist/index.js
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ring-bridge
+
+# Give the process time to shut down gracefully
+TimeoutStopSec=15
+
+[Install]
+WantedBy=multi-user.target
