@@ -1,27 +1,18 @@
-import { RingApi } from 'ring-client-api';
+import { Location as RingLocation, RingApi, RingCamera, RingDevice, RingDeviceCategory, RingDeviceData, RingDeviceType } from 'ring-client-api';
+import type { Observable } from 'rxjs';
 import { config } from '../config';
 import { DeviceInfo } from './devices';
 import { handleAlarmMode, handleContact, handleDing, handleLightLevel, handleLightOn, handleLockData, handleMotion } from './eventHandlers';
 import { log } from '../logger';
 
-// Infer types from ring-client-api rather than relying on named exports that vary by version
-type RingLocation = Awaited<ReturnType<RingApi['getLocations']>>[number];
-type RingCamera   = Awaited<ReturnType<RingLocation['getCameras']>>[number];
-type RingDevice   = Awaited<ReturnType<RingLocation['getDevices']>>[number];
-
-// Device data shapes we care about (ring-client-api uses dynamic device data objects)
-interface ContactData { faulted?: boolean }
-interface LockData    { locked?: 'locked' | 'unlocked' }
-interface LightData   { on?: boolean; brightness?: number }
-
-// Ring Bridge-connected device types. ring-client-api returns these via getDevices().
-// Run `npm run smoke` with LOG_LEVEL=debug to log unknown types if lights don't appear.
-const LIGHT_DEVICE_TYPES = new Set([
-  'switch.multilevel',          // dimmable smart light
-  'switch.binary',              // on/off smart light
-  'switch.multilevel.outdoor',  // outdoor dimmable
-  'lighting.light.beams',       // Ring Beams (motion-activated floodlight)
-  'outdoor-plug',               // outdoor smart plug used as light switch
+// Ring Bridge-connected light device types (Ring Beams and multilevel switches)
+const LIGHT_DEVICE_TYPES = new Set<RingDeviceType>([
+  RingDeviceType.MultiLevelSwitch,
+  RingDeviceType.MultiLevelBulb,
+  RingDeviceType.BeamsSwitch,
+  RingDeviceType.BeamsMultiLevelSwitch,
+  RingDeviceType.BeamsLightGroupSwitch,
+  RingDeviceType.BeamsTransformerSwitch,
 ]);
 
 // Populated on init; used by the HTTP server for /devices and command routing
@@ -35,9 +26,8 @@ const MAX_RETRIES = 5;
 export async function initRingClient(): Promise<void> {
   const ring = new RingApi({ refreshToken: config.ringRefreshToken });
 
-  // Log if ring rotates our refresh token so the user knows to update .env
   ring.onRefreshTokenUpdated.subscribe(({ newRefreshToken }) => {
-    log.warn(`Ring refresh token rotated. Update RING_REFRESH_TOKEN in .env to: ${newRefreshToken}`);
+    log.warn(`Ring refresh token rotated — update RING_REFRESH_TOKEN in .env to: ${newRefreshToken}`);
   });
 
   const locations = await ring.getLocations();
@@ -55,7 +45,7 @@ export async function initRingClient(): Promise<void> {
 async function subscribeLocation(location: RingLocation): Promise<void> {
   locationStore.set(location.id, location);
 
-  // One virtual alarm device per location
+  // One virtual alarm device per location (for arm/disarm control)
   discoveredDevices.push({
     id: location.id,
     name: `${location.name} Alarm`,
@@ -63,21 +53,17 @@ async function subscribeLocation(location: RingLocation): Promise<void> {
     locationId: location.id,
   });
 
-  subscribeWithRetry(
-    location.onAlarmMode,
-    mode => handleAlarmMode(location, mode),
-    `alarm:${location.name}`,
-  );
+  // Subscribe to alarm mode via security panel device data
+  subscribeAlarmMode(location);
 
-  const [cameras, devices] = await Promise.all([
-    location.getCameras(),
-    location.getDevices(),
-  ]);
+  // cameras is a property (not a method) on Location
+  const cameras = location.cameras;
+  const devices = await location.getDevices();
 
   let lights = 0;
   for (const camera of cameras) subscribeCamera(camera, location.id);
   for (const device of devices) {
-    if (LIGHT_DEVICE_TYPES.has(device.deviceType)) {
+    if (LIGHT_DEVICE_TYPES.has(device.deviceType) || device.categoryId === RingDeviceCategory.Lights) {
       subscribeLightDevice(device, location.id);
       lights++;
     } else {
@@ -88,13 +74,37 @@ async function subscribeLocation(location: RingLocation): Promise<void> {
   log.info(`"${location.name}": ${cameras.length} camera(s), ${devices.length - lights} alarm device(s), ${lights} light(s)`);
 }
 
+// ── Alarm mode ────────────────────────────────────────────────────────────────
+
+function subscribeAlarmMode(location: RingLocation): void {
+  location.getSecurityPanel()
+    .then(panel => {
+      let lastMode: string | undefined;
+      subscribeWithRetry(
+        panel.onData,
+        async (data: RingDeviceData) => {
+          const mode = data.mode as string | undefined;
+          if (mode && mode !== lastMode) {
+            lastMode = mode;
+            await handleAlarmMode(location, mode);
+          }
+        },
+        `alarm:${location.name}`,
+      );
+    })
+    .catch(() => {
+      log.debug(`No security panel at "${location.name}" — skipping alarm subscription`);
+    });
+}
+
 // ── Camera ────────────────────────────────────────────────────────────────────
 
 function subscribeCamera(camera: RingCamera, locationId: string): void {
+  const doorbell = (camera.deviceType as string).includes('doorbell');
   discoveredDevices.push({
     id: camera.id.toString(),
     name: camera.name,
-    type: camera.isDoorbell ? 'doorbell' : 'camera',
+    type: doorbell ? 'doorbell' : 'camera',
     locationId,
   });
 
@@ -104,7 +114,7 @@ function subscribeCamera(camera: RingCamera, locationId: string): void {
     `motion:${camera.name}`,
   );
 
-  if (camera.isDoorbell) {
+  if (doorbell) {
     subscribeWithRetry(
       camera.onDoorbellPressed,
       () => handleDing(camera),
@@ -113,14 +123,12 @@ function subscribeCamera(camera: RingCamera, locationId: string): void {
   }
 }
 
-// ── Alarm devices (sensors, locks) ───────────────────────────────────────────
+// ── Alarm devices (contact sensors, locks) ────────────────────────────────────
 
 function subscribeAlarmDevice(device: RingDevice, location: RingLocation): void {
-  const { deviceType } = device;
-
-  if (deviceType === 'sensor.contact') {
+  if (device.deviceType === RingDeviceType.ContactSensor) {
     discoveredDevices.push({
-      id: device.id.toString(),
+      id: device.id,
       name: device.name,
       type: 'contact-sensor',
       locationId: location.id,
@@ -128,16 +136,16 @@ function subscribeAlarmDevice(device: RingDevice, location: RingLocation): void 
 
     subscribeWithRetry(
       device.onData,
-      (data: ContactData) => {
-        if (data.faulted !== undefined) return handleContact(device, data.faulted);
-        return Promise.resolve();
+      async (data: RingDeviceData) => {
+        if (data.faulted !== undefined) await handleContact(device, data.faulted);
       },
       `contact:${device.name}`,
     );
-  } else if (deviceType === 'lock') {
-    lockStore.set(device.id.toString(), device);
+
+  } else if (device.categoryId === RingDeviceCategory.Locks) {
+    lockStore.set(device.id, device);
     discoveredDevices.push({
-      id: device.id.toString(),
+      id: device.id,
       name: device.name,
       type: 'lock',
       locationId: location.id,
@@ -145,9 +153,8 @@ function subscribeAlarmDevice(device: RingDevice, location: RingLocation): void 
 
     subscribeWithRetry(
       device.onData,
-      (data: LockData) => {
-        if (data.locked !== undefined) return handleLockData(device, data.locked, location);
-        return Promise.resolve();
+      async (data: RingDeviceData) => {
+        if (data.locked !== undefined) await handleLockData(device, data.locked, location);
       },
       `lock:${device.name}`,
     );
@@ -157,30 +164,29 @@ function subscribeAlarmDevice(device: RingDevice, location: RingLocation): void 
 // ── Smart Light (Ring Bridge-connected) ───────────────────────────────────────
 
 function subscribeLightDevice(device: RingDevice, locationId: string): void {
-  lightStore.set(device.id.toString(), device);
+  lightStore.set(device.id, device);
   discoveredDevices.push({
-    id: device.id.toString(),
+    id: device.id,
     name: device.name,
     type: 'light',
     locationId,
   });
 
   let lastOn: boolean | undefined;
-  let lastBrightness: number | undefined;
+  let lastLevel: number | undefined;
 
   subscribeWithRetry(
     device.onData,
-    (data: LightData) => {
-      const promises: Promise<void>[] = [];
+    async (data: RingDeviceData) => {
       if (data.on !== undefined && data.on !== lastOn) {
         lastOn = data.on;
-        promises.push(handleLightOn(device, data.on));
+        await handleLightOn(device, data.on);
       }
-      if (data.brightness !== undefined && data.brightness !== lastBrightness) {
-        lastBrightness = data.brightness;
-        promises.push(handleLightLevel(device, data.brightness));
+      const brightness = data.level ?? data.brightness;
+      if (brightness !== undefined && brightness !== lastLevel) {
+        lastLevel = brightness;
+        await handleLightLevel(device, brightness);
       }
-      return Promise.all(promises).then(() => undefined);
     },
     `light:${device.name}`,
   );
@@ -189,7 +195,7 @@ function subscribeLightDevice(device: RingDevice, locationId: string): void {
 // ── Subscription helper with exponential-backoff retry ───────────────────────
 
 function subscribeWithRetry<T>(
-  observable: { subscribe: (opts: { next: (v: T) => void; error: (e: unknown) => void }) => void },
+  observable: Observable<T>,
   handler: (value: T) => Promise<void>,
   label: string,
   retries = 0,
@@ -198,7 +204,7 @@ function subscribeWithRetry<T>(
     next: value => {
       handler(value).catch(err => log.error(`Handler error [${label}]: ${err}`));
     },
-    error: err => {
+    error: (err: unknown) => {
       log.error(`Subscription error [${label}]: ${err}`);
       if (retries >= MAX_RETRIES) {
         log.error(`[${label}] max retries (${MAX_RETRIES}) exceeded — no longer receiving events`);

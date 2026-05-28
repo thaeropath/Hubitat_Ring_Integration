@@ -1,10 +1,6 @@
-import { RingApi } from 'ring-client-api';
+import { Location as RingLocation, RingCamera, RingDevice } from 'ring-client-api';
 import { sendEvent } from '../hubitat/client';
 import { log } from '../logger';
-
-type RingLocation = Awaited<ReturnType<RingApi['getLocations']>>[number];
-type RingCamera   = Awaited<ReturnType<RingLocation['getCameras']>>[number];
-type RingDevice   = Awaited<ReturnType<RingLocation['getDevices']>>[number];
 
 const HISTORY_DELAY_MS = 500;
 
@@ -19,27 +15,11 @@ const ALARM_MODE_MAP: Record<string, string> = {
 export async function handleAlarmMode(location: RingLocation, mode: string): Promise<void> {
   const value = ALARM_MODE_MAP[mode] ?? mode;
 
-  // Brief pause so Ring history records the event before we query it
   await delay(HISTORY_DELAY_MS);
-  const lastUser = await resolveAlarmUser(location, mode);
+  const lastUser = await resolveHistoryUser(location);
 
   await sendEvent({ deviceId: location.id, type: 'alarm', value, lastUser });
   log.info(`Alarm "${location.name}" → ${value}${lastUser ? ` (${lastUser})` : ''}`);
-}
-
-async function resolveAlarmUser(location: RingLocation, mode: string): Promise<string | undefined> {
-  try {
-    const history = await location.getHistory({ limit: 5 });
-    for (const entry of history) {
-      const ctx = (entry as { context?: Record<string, string> }).context;
-      if (!ctx) continue;
-      const name = ctx.userName ?? ctx.agentName;
-      if (name) return name;
-    }
-  } catch (err) {
-    log.warn(`Could not fetch alarm history for user attribution: ${err}`);
-  }
-  return undefined;
 }
 
 // ── Camera / Doorbell ─────────────────────────────────────────────────────────
@@ -55,11 +35,11 @@ export async function handleDing(camera: RingCamera): Promise<void> {
   log.info(`Ding "${camera.name}"`);
 }
 
-// ── Contact sensor ─────────────────────────────────────────────────────────────
+// ── Contact sensor ────────────────────────────────────────────────────────────
 
 export async function handleContact(device: RingDevice, faulted: boolean): Promise<void> {
   const value = faulted ? 'open' : 'closed';
-  await sendEvent({ deviceId: device.id.toString(), type: 'contact', value });
+  await sendEvent({ deviceId: device.id, type: 'contact', value });
   log.info(`Contact "${device.name}" → ${value}`);
 }
 
@@ -67,17 +47,39 @@ export async function handleContact(device: RingDevice, faulted: boolean): Promi
 
 export async function handleLockData(
   device: RingDevice,
-  locked: 'locked' | 'unlocked',
+  locked: 'locked' | 'unlocked' | 'jammed' | 'unknown',
   location: RingLocation,
 ): Promise<void> {
-  await delay(HISTORY_DELAY_MS);
-  const lastUser = await resolveLockUser(location, locked);
+  // jammed and unknown are forwarded as-is; only look up user for actual state changes
+  if (locked === 'jammed' || locked === 'unknown') {
+    await sendEvent({ deviceId: device.id, type: 'lock', value: locked });
+    log.info(`Lock "${device.name}" → ${locked}`);
+    return;
+  }
 
-  await sendEvent({ deviceId: device.id.toString(), type: 'lock', value: locked, lastUser });
+  await delay(HISTORY_DELAY_MS);
+  const lastUser = await resolveHistoryUser(location);
+
+  await sendEvent({ deviceId: device.id, type: 'lock', value: locked, lastUser });
   log.info(`Lock "${device.name}" → ${locked}${lastUser ? ` (${lastUser})` : ''}`);
 }
 
-async function resolveLockUser(location: RingLocation, _state: string): Promise<string | undefined> {
+// ── Smart Light (Ring Bridge-connected) ───────────────────────────────────────
+
+export async function handleLightOn(device: RingDevice, on: boolean): Promise<void> {
+  await sendEvent({ deviceId: device.id, type: 'switch', value: on ? 'on' : 'off' });
+  log.info(`Light "${device.name}" → ${on ? 'on' : 'off'}`);
+}
+
+export async function handleLightLevel(device: RingDevice, level: number): Promise<void> {
+  const clamped = Math.min(100, Math.max(0, Math.round(level)));
+  await sendEvent({ deviceId: device.id, type: 'level', value: clamped.toString() });
+  log.info(`Light "${device.name}" level → ${clamped}%`);
+}
+
+// ── Shared user attribution (alarm + lock) ────────────────────────────────────
+
+async function resolveHistoryUser(location: RingLocation): Promise<string | undefined> {
   try {
     const history = await location.getHistory({ limit: 5 });
     for (const entry of history) {
@@ -87,23 +89,9 @@ async function resolveLockUser(location: RingLocation, _state: string): Promise<
       if (name) return name;
     }
   } catch (err) {
-    log.warn(`Could not fetch lock history for user attribution: ${err}`);
+    log.warn(`Could not fetch history for user attribution: ${err}`);
   }
   return undefined;
-}
-
-// ── Smart Light (Ring Bridge-connected) ───────────────────────────────────────
-
-export async function handleLightOn(device: RingDevice, on: boolean): Promise<void> {
-  await sendEvent({ deviceId: device.id.toString(), type: 'switch', value: on ? 'on' : 'off' });
-  log.info(`Light "${device.name}" → ${on ? 'on' : 'off'}`);
-}
-
-export async function handleLightLevel(device: RingDevice, level: number): Promise<void> {
-  // Ring brightness is 0-100; Hubitat SwitchLevel expects 0-100
-  const clamped = Math.min(100, Math.max(0, Math.round(level)));
-  await sendEvent({ deviceId: device.id.toString(), type: 'level', value: clamped.toString() });
-  log.info(`Light "${device.name}" level → ${clamped}%`);
 }
 
 // ── Utility ───────────────────────────────────────────────────────────────────
