@@ -5,7 +5,7 @@ import { DeviceInfo } from './devices';
 import { handleAlarmMode, handleContact, handleDing, handleLightLevel, handleLightOn, handleLockData, handleMotion } from './eventHandlers';
 import { log } from '../logger';
 
-// Ring Bridge-connected light device types (Ring Beams and multilevel switches)
+// Ring Bridge-connected light device types
 const LIGHT_DEVICE_TYPES = new Set<RingDeviceType>([
   RingDeviceType.MultiLevelSwitch,
   RingDeviceType.MultiLevelBulb,
@@ -30,22 +30,33 @@ export async function initRingClient(): Promise<void> {
     log.warn(`Ring refresh token rotated — update RING_REFRESH_TOKEN in .env to: ${newRefreshToken}`);
   });
 
-  const locations = await ring.getLocations();
-  log.info(`Found ${locations.length} Ring location(s)`);
+  // Fetch cameras and locations in parallel.
+  // ring.getCameras() is the reliable top-level call — location.cameras can be
+  // empty if fetchAndBuildLocations() hasn't associated cameras yet.
+  const [locations, allCameras] = await Promise.all([
+    ring.getLocations(),
+    ring.getCameras(),
+  ]);
 
-  for (const location of locations) {
-    await subscribeLocation(location);
+  log.info(`Found ${locations.length} location(s), ${allCameras.length} camera(s)`);
+
+  for (const camera of allCameras) {
+    subscribeCamera(camera, camera.data.location_id ?? '');
   }
 
-  log.info(`Subscribed to ${discoveredDevices.length} Ring device(s)`);
+  for (const location of locations) {
+    subscribeLocation(location);
+  }
+
+  log.info(`Initial discovery complete — ${discoveredDevices.length} device(s) found so far`);
+  log.info(`Alarm/lock/sensor devices load async as the hub WebSocket connects; re-run Hubitat discovery after a few seconds if needed`);
 }
 
 // ── Location ──────────────────────────────────────────────────────────────────
 
-async function subscribeLocation(location: RingLocation): Promise<void> {
+function subscribeLocation(location: RingLocation): void {
   locationStore.set(location.id, location);
 
-  // One virtual alarm device per location (for arm/disarm control)
   discoveredDevices.push({
     id: location.id,
     name: `${location.name} Alarm`,
@@ -53,25 +64,41 @@ async function subscribeLocation(location: RingLocation): Promise<void> {
     locationId: location.id,
   });
 
-  // Subscribe to alarm mode via security panel device data
   subscribeAlarmMode(location);
 
-  // cameras is a property (not a method) on Location
-  const cameras = location.cameras;
-  const devices = await location.getDevices();
+  // Track which device IDs we've already subscribed — onDevices may fire
+  // multiple times (initial load, hub reconnects) and getDevices() races it.
+  const subscribedIds = new Set<string>();
 
-  let lights = 0;
-  for (const camera of cameras) subscribeCamera(camera, location.id);
-  for (const device of devices) {
-    if (LIGHT_DEVICE_TYPES.has(device.deviceType) || device.categoryId === RingDeviceCategory.Lights) {
-      subscribeLightDevice(device, location.id);
-      lights++;
-    } else {
-      subscribeAlarmDevice(device, location);
+  const handleDevices = (devices: RingDevice[]): void => {
+    let added = 0;
+    for (const device of devices) {
+      if (subscribedIds.has(device.id)) continue;
+      subscribedIds.add(device.id);
+      added++;
+
+      if (LIGHT_DEVICE_TYPES.has(device.deviceType) || device.categoryId === RingDeviceCategory.Lights) {
+        subscribeLightDevice(device, location.id);
+      } else {
+        subscribeAlarmDevice(device, location);
+      }
     }
-  }
+    if (added > 0) {
+      log.info(`"${location.name}": loaded ${added} new alarm device(s) (bridge total: ${discoveredDevices.length})`);
+    }
+  };
 
-  log.info(`"${location.name}": ${cameras.length} camera(s), ${devices.length - lights} alarm device(s), ${lights} light(s)`);
+  // onDevices fires when the alarm hub WebSocket connects and sends the device list.
+  // This is the primary mechanism — it may fire seconds after startup.
+  location.onDevices.subscribe({
+    next:  handleDevices,
+    error: err => log.error(`onDevices error for "${location.name}": ${err}`),
+  });
+
+  // Also try getDevices() eagerly in case the hub is already connected.
+  location.getDevices()
+    .then(handleDevices)
+    .catch(err => log.debug(`getDevices() early fetch for "${location.name}": ${err}`));
 }
 
 // ── Alarm mode ────────────────────────────────────────────────────────────────
