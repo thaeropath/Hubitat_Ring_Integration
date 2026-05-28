@@ -98,6 +98,13 @@ function subscribeLocation(location: RingLocation): void {
 
   subscribeAlarmMode(location);
 
+  log.info(`"${location.name}": hasHubs=${location.hasHubs}  hasAlarmBaseStation=${location.hasAlarmBaseStation}`);
+
+  if (!location.hasHubs) {
+    log.warn(`"${location.name}": Ring reports no hub at this location — locks, sensors, and lights will not be available`);
+    return;
+  }
+
   // Track which device IDs we've already subscribed — onDevices may fire
   // multiple times (initial load, hub reconnects) and getDevices() races it.
   const subscribedIds = new Set<string>();
@@ -127,18 +134,24 @@ function subscribeLocation(location: RingLocation): void {
     }
   };
 
+  // Log hub connection state changes
+  location.onConnected.subscribe(connected => {
+    log.info(`"${location.name}": alarm hub WebSocket ${connected ? 'connected' : 'disconnected'}`);
+  });
+
   // onDevices fires when the alarm hub WebSocket connects and sends the device list.
-  // This is the primary mechanism — it may fire seconds after startup.
-  log.debug(`"${location.name}": subscribing to onDevices — waiting for alarm hub WebSocket...`);
   location.onDevices.subscribe({
     next:  handleDevices,
     error: err => log.error(`onDevices error for "${location.name}": ${err}`),
   });
 
-  // Also try getDevices() eagerly in case the hub is already connected.
-  location.getDevices()
+  // Explicitly open the hub WebSocket connection (ring-client-api may not open it
+  // until something requests it). Then also call getDevices() in case it resolves
+  // from cache before onDevices fires.
+  location.getConnection()
+    .then(() => location.getDevices())
     .then(handleDevices)
-    .catch(err => log.warn(`getDevices() failed for "${location.name}": ${err}`));
+    .catch(err => log.warn(`Hub connection/getDevices() failed for "${location.name}": ${err}`));
 }
 
 // ── Alarm mode ────────────────────────────────────────────────────────────────
