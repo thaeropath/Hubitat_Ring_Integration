@@ -81,9 +81,11 @@ Hubitat_Ring_Integration/
 │   │   │   ├── devices.ts            ← Ring device type definitions and normalisation
 │   │   │   └── eventHandlers.ts      ← per-event-type handlers that call Hubitat
 │   │   ├── hubitat/
-│   │   │   ├── makerApi.ts           ← HTTP client for Hubitat Maker API
-│   │   │   └── deviceMap.ts          ← maps Ring device IDs → Hubitat virtual device IDs
+│   │   │   ├── client.ts             ← HTTP client that POSTs events to Hubitat app endpoint
+│   │   │   └── deviceMap.ts          ← maps Ring device IDs → Hubitat child device IDs
 │   │   └── server.ts                 ← Express HTTP server (Hubitat → Bridge commands)
+│   ├── Dockerfile                    ← multi-stage build; ARM64-compatible (Pi + NAS)
+│   ├── docker-compose.yml            ← mounts .env, restart: unless-stopped
 │   ├── package.json
 │   ├── tsconfig.json
 │   └── .env.example
@@ -97,7 +99,8 @@ Hubitat_Ring_Integration/
 │       └── RingLock.groovy           ← capability: Lock, capability: LockCodes
 └── docs/
     ├── setup.md                      ← end-user installation guide
-    └── architecture.md               ← deeper design notes
+    ├── architecture.md               ← deeper design notes
+    └── ring-bridge.service           ← systemd unit for bare-metal Pi (no Docker)
 ```
 
 ---
@@ -111,6 +114,9 @@ Hubitat_Ring_Integration/
 | Bridge HTTP framework | Express 4 | minimal, no framework magic |
 | Hubitat language | Groovy (Hubitat DSL) | runs on-hub, no external runtime |
 | Hubitat ↔ Bridge protocol | HTTP REST (JSON) | LAN only; bridge must be on same LAN segment as hub |
+| Container | Docker (multi-stage, `node:20-alpine`) | ARM64 image — runs on Raspberry Pi and NAS |
+| Orchestration | `docker-compose.yml` | single-file deploy for NAS (Synology/QNAP) or Pi + Docker |
+| Bare-metal service | systemd (`ring-bridge.service`) | alternative for Pi without Docker |
 
 ---
 
@@ -202,13 +208,38 @@ npm run dev          # ts-node-dev with hot reload
 npx ring-auth-cli   # follow 2FA prompts, copies token to stdout
 ```
 
-### Running in production
+### Deploying — Docker (Raspberry Pi with Docker or NAS)
+
+```bash
+# Copy and fill in your credentials
+cp bridge/.env.example bridge/.env
+
+# Build and start (detached)
+docker compose -f bridge/docker-compose.yml up -d
+
+# View logs
+docker compose -f bridge/docker-compose.yml logs -f
+
+# Update to latest build
+docker compose -f bridge/docker-compose.yml up -d --build
+```
+
+The Docker image is built for `linux/arm64` (Raspberry Pi 4/5, Zero 2W) and `linux/amd64` (NAS with x86 CPU). `docker-compose.yml` sets `restart: unless-stopped` so the bridge comes back after a reboot automatically.
+
+### Deploying — bare-metal Raspberry Pi (no Docker)
 
 ```bash
 cd bridge
-npm run build        # tsc → dist/
-npm start            # node dist/index.js
-# Or use the provided systemd unit file: docs/ring-bridge.service
+npm run build                          # compile TypeScript → dist/
+cp .env.example .env                   # fill in credentials
+
+# Install and start the systemd service
+sudo cp ../docs/ring-bridge.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now ring-bridge
+
+# View logs
+journalctl -u ring-bridge -f
 ```
 
 ### Hubitat driver/app installation
