@@ -21,6 +21,25 @@ useLogger({
   logError: (...args) => log.warn(`[ring] ${args.join(' ')}`),
 });
 
+// Intercept socket.io-client to log the WSS host ring-client-api is connecting to.
+// This module is already loaded at this point (ring-client-api imports it), so we
+// wrap the cached export — ring-client-api will call our wrapper.
+/* eslint-disable @typescript-eslint/no-require-imports */
+const sio = require('socket.io-client') as { connect: (...args: unknown[]) => unknown };
+const _origSioConnect = sio.connect.bind(sio);
+sio.connect = (url: unknown, ...rest: unknown[]) => {
+  if (typeof url === 'string') {
+    try {
+      const { hostname, port } = new URL(url);
+      log.info(`[socket.io] Connecting → ${hostname}:${port || 443}`);
+    } catch {
+      log.info(`[socket.io] Connecting → ${String(url).split('?')[0]}`);
+    }
+  }
+  return _origSioConnect(url, ...rest);
+};
+/* eslint-enable @typescript-eslint/no-require-imports */
+
 // Ring Bridge-connected light device types
 const LIGHT_DEVICE_TYPES = new Set<RingDeviceType>([
   RingDeviceType.MultiLevelSwitch,
