@@ -148,10 +148,17 @@ function subscribeLocation(location: RingLocation): void {
   // Explicitly open the hub WebSocket connection (ring-client-api may not open it
   // until something requests it). Then also call getDevices() in case it resolves
   // from cache before onDevices fires.
-  location.getConnection()
-    .then(() => location.getDevices())
+  log.info(`"${location.name}": calling getConnection() to open alarm hub WebSocket...`);
+  const connectionTimeout = new Promise<never>((_, reject) =>
+    setTimeout(() => reject(new Error('timed out after 30s — check DEBUG=ring logs for details')), 30_000),
+  );
+  Promise.race([location.getConnection(), connectionTimeout])
+    .then(() => {
+      log.info(`"${location.name}": getConnection() resolved — requesting device list`);
+      return location.getDevices();
+    })
     .then(handleDevices)
-    .catch(err => log.warn(`Hub connection/getDevices() failed for "${location.name}": ${err}`));
+    .catch(err => log.warn(`"${location.name}": hub connection failed: ${err}`));
 }
 
 // ── Alarm mode ────────────────────────────────────────────────────────────────
