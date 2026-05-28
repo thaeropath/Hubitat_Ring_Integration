@@ -7,6 +7,7 @@ definition(
     iconUrl:     "",
     iconX2Url:   "",
     singleInstance: true,
+    oauth:          true,
 )
 
 // ── HTTP endpoints exposed to the bridge server ───────────────────────────────
