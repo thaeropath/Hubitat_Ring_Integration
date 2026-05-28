@@ -1,5 +1,7 @@
 import { Location as RingLocation, RingApi, RingCamera, RingDevice, RingDeviceCategory, RingDeviceData, RingDeviceType } from 'ring-client-api';
 import type { Observable } from 'rxjs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
+import path from 'path';
 import { config } from '../config';
 import { DeviceInfo } from './devices';
 import { handleAlarmMode, handleContact, handleDing, handleLightLevel, handleLightOn, handleLockData, handleMotion } from './eventHandlers';
@@ -23,11 +25,41 @@ export const lightStore     = new Map<string, RingDevice>();
 
 const MAX_RETRIES = 5;
 
+// ── Refresh token persistence ─────────────────────────────────────────────────
+// Ring issues a new refresh token on every auth. We persist it to a file so
+// container restarts always start with the latest valid token.
+
+function loadRefreshToken(): string {
+  const { tokenFile, ringRefreshToken } = config;
+  if (existsSync(tokenFile)) {
+    const saved = readFileSync(tokenFile, 'utf8').trim();
+    if (saved) {
+      log.info(`Loaded refresh token from ${tokenFile}`);
+      return saved;
+    }
+  }
+  return ringRefreshToken;
+}
+
+function saveRefreshToken(token: string): void {
+  const { tokenFile } = config;
+  try {
+    mkdirSync(path.dirname(tokenFile), { recursive: true });
+    writeFileSync(tokenFile, token, 'utf8');
+    log.info(`Refresh token saved to ${tokenFile} — container restarts will use this automatically`);
+  } catch (err) {
+    log.warn(`Could not save refresh token to ${tokenFile}: ${err}`);
+    log.warn(`Update RING_REFRESH_TOKEN in .env manually to: ${token}`);
+  }
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+
 export async function initRingClient(): Promise<void> {
-  const ring = new RingApi({ refreshToken: config.ringRefreshToken });
+  const ring = new RingApi({ refreshToken: loadRefreshToken() });
 
   ring.onRefreshTokenUpdated.subscribe(({ newRefreshToken }) => {
-    log.warn(`Ring refresh token rotated — update RING_REFRESH_TOKEN in .env to: ${newRefreshToken}`);
+    saveRefreshToken(newRefreshToken);
   });
 
   // Fetch cameras and locations in parallel.
@@ -71,6 +103,10 @@ function subscribeLocation(location: RingLocation): void {
   const subscribedIds = new Set<string>();
 
   const handleDevices = (devices: RingDevice[]): void => {
+    if (devices.length === 0) {
+      log.debug(`"${location.name}": handleDevices called with empty list — alarm hub not yet connected`);
+      return;
+    }
     let added = 0;
     for (const device of devices) {
       if (subscribedIds.has(device.id)) continue;
@@ -93,6 +129,7 @@ function subscribeLocation(location: RingLocation): void {
 
   // onDevices fires when the alarm hub WebSocket connects and sends the device list.
   // This is the primary mechanism — it may fire seconds after startup.
+  log.debug(`"${location.name}": subscribing to onDevices — waiting for alarm hub WebSocket...`);
   location.onDevices.subscribe({
     next:  handleDevices,
     error: err => log.error(`onDevices error for "${location.name}": ${err}`),
@@ -101,7 +138,7 @@ function subscribeLocation(location: RingLocation): void {
   // Also try getDevices() eagerly in case the hub is already connected.
   location.getDevices()
     .then(handleDevices)
-    .catch(err => log.debug(`getDevices() early fetch for "${location.name}": ${err}`));
+    .catch(err => log.warn(`getDevices() failed for "${location.name}": ${err}`));
 }
 
 // ── Alarm mode ────────────────────────────────────────────────────────────────
