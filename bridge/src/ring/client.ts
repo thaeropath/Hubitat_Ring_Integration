@@ -77,6 +77,9 @@ function subscribeLocation(location: RingLocation): void {
       subscribedIds.add(device.id);
       added++;
 
+      // Log every device so unknown types (e.g. Ring Bridge lights) can be identified
+      log.debug(`Device: "${device.name}"  type=${device.deviceType}  categoryId=${device.categoryId}  id=${device.id}`);
+
       if (LIGHT_DEVICE_TYPES.has(device.deviceType) || device.categoryId === RingDeviceCategory.Lights) {
         subscribeLightDevice(device, location.id);
       } else {
