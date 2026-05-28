@@ -7,6 +7,15 @@ import { DeviceInfo } from './devices';
 import { handleAlarmMode, handleContact, handleDing, handleLightLevel, handleLightOn, handleLockData, handleMotion } from './eventHandlers';
 import { log } from '../logger';
 
+// Route ring-client-api internal logs through our logger so we can see
+// the socket.io host, connection errors, and other internal details.
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const { useLogger } = require('ring-client-api/lib/util') as { useLogger: (l: { logInfo: (...a: unknown[]) => void; logError: (...a: unknown[]) => void }) => void };
+useLogger({
+  logInfo:  (...args) => log.info(`[ring-client-api] ${args.join(' ')}`),
+  logError: (...args) => log.warn(`[ring-client-api] ${args.join(' ')}`),
+});
+
 // Ring Bridge-connected light device types
 const LIGHT_DEVICE_TYPES = new Set<RingDeviceType>([
   RingDeviceType.MultiLevelSwitch,
