@@ -30,18 +30,39 @@ Ring Cloud  ←──── ring-client-api (WebSocket) ────→  Bridge 
                                          (RingIntegrationApp)    (one per device type)
 ```
 
+### How Ring events reach the bridge (no polling)
+
+Ring pushes events to connected clients over WebSocket — the same channel the Ring mobile app uses for instant notifications. The `ring-client-api` library speaks this protocol, so the bridge holds a persistent WebSocket connection to Ring's cloud and receives all events in real time:
+
+| Event | ring-client-api subscription | Latency |
+|---|---|---|
+| Camera / doorbell motion | `camera.onMotionDetected` | real-time push |
+| Doorbell press (ding) | `camera.onDoorbellPressed` | real-time push |
+| Contact sensor open/close | `sensor.onData` (faulted field) | real-time push |
+| Alarm arm/disarm | `location.onAlarmMode` | real-time push |
+| Lock locked/unlocked | `lock.onData` (locked field) | real-time push |
+| User attribution | `location.getHistory()` REST call after event | +~500 ms |
+
+No polling is required. The only follow-up REST call is the history lookup needed to identify *who* armed/disarmed or locked/unlocked, since the WebSocket payload does not include user context.
+
+The reason the existing Groovy-only "Unofficial Ring Integration" has to poll is that Hubitat's Groovy runtime has no WebSocket support. Our Node.js bridge sidesteps that entirely.
+
 ### Bridge server responsibilities
 
 1. Authenticate with Ring (OAuth 2FA token, stored in `~/.ring-token.json`)
-2. Subscribe to all Ring device events via `ring-client-api` WebSocket
-3. On each event, POST to Hubitat's Maker API to update the matching virtual device attribute
-4. Expose an HTTP API so Hubitat can send commands (arm/disarm, lock/unlock) back to Ring
+2. Maintain a persistent WebSocket connection to Ring via `ring-client-api`; re-subscribe with exponential backoff on disconnect
+3. On each Ring event, POST to the Hubitat app's own HTTP endpoint to update the matching child device
+4. Expose an HTTP API so Hubitat drivers can send commands (arm/disarm, lock/unlock) back to Ring
 5. Serve a `/devices` endpoint listing all discovered Ring devices (used during Hubitat app setup)
 
 ### Hubitat side responsibilities
 
-1. **App** (`RingIntegrationApp.groovy`): Install wizard that prompts for bridge IP/port + Maker API token, discovers Ring devices via `/devices`, creates a child virtual device for each
-2. **Drivers** (one `.groovy` per device type): Declare the right Hubitat capabilities, handle attribute updates from the bridge, and send command HTTP calls to the bridge
+1. **App** (`RingIntegrationApp.groovy`): Install wizard that prompts for bridge IP/port, discovers Ring devices via the bridge `/devices` endpoint, creates a child virtual device for each. Exposes its own HTTP endpoint (via Groovy `mappings {}`) that the bridge POSTs events to — **no Maker API required**.
+2. **Drivers** (one `.groovy` per device type): Declare the right Hubitat capabilities, receive attribute updates parsed by the app, and POST command calls to the bridge HTTP API.
+
+### Why not Maker API
+
+Hubitat's Maker API is a generic external-control interface for devices that already exist on the hub. It would require the user to install it separately, manually expose devices, and copy app IDs and tokens. Our custom `RingIntegrationApp.groovy` uses Hubitat's built-in `mappings {}` feature to expose its own endpoints instead — the app generates its own access token and presents the full endpoint URL to the user during setup. This reduces the user-facing setup to two steps: install the app, paste the URL into the bridge `.env`.
 
 ---
 
@@ -119,30 +140,31 @@ Ring alarm mode values → Hubitat mapping:
 - `'some'` → armed-home  
 - `'none'` → disarmed
 
-### Hubitat Maker API
+### Hubitat custom app HTTP endpoint
 
-Base URL: `http://<HUBITAT_IP>/apps/api/<MAKER_APP_ID>`
-
-All requests include `?access_token=<TOKEN>` query param.
+`RingIntegrationApp.groovy` declares a `mappings {}` block exposing:
 
 ```
-GET  /devices                        → list all Maker-API-exposed devices
-GET  /devices/<id>                   → get device state
-GET  /devices/<id>/commands          → list available commands
-GET  /devices/<id>/<command>         → send command (e.g. /devices/42/open)
-GET  /devices/<id>/<command>/<arg>   → send command with arg (e.g. /devices/42/setLockCode/1)
+POST http://<HUBITAT_IP>/apps/api/<RING_APP_ID>/ring/event?access_token=<TOKEN>
 ```
 
-Event push: Hubitat POSTs to a URL you register in the Maker API app UI:
+The bridge POSTs Ring events to this URL. Payload:
 ```json
 {
-  "deviceId": "42",
-  "name": "motion",
+  "deviceId": "ring-device-id-123",
+  "type": "motion",
   "value": "active",
-  "displayName": "Front Door Camera",
-  "descriptionText": "Front Door Camera motion is active"
+  "lastUser": "Jane Smith"
 }
 ```
+
+The app also exposes:
+```
+GET  /ring/devices     → triggers bridge to refresh device list (called during setup)
+POST /ring/command     → (future) hub-initiated commands if needed
+```
+
+The Groovy app generates its own `access_token` (a UUID stored in app state) on first install and displays the full endpoint URL to the user in the setup page. No Maker API installation required.
 
 ---
 
@@ -215,16 +237,14 @@ Documented in `bridge/.env.example`. Required:
 | Variable | Description |
 |---|---|
 | `RING_REFRESH_TOKEN` | OAuth refresh token from `npx ring-auth-cli` |
-| `HUBITAT_IP` | LAN IP of Hubitat hub |
-| `HUBITAT_MAKER_APP_ID` | Numeric app ID from Hubitat Maker API |
-| `HUBITAT_ACCESS_TOKEN` | Maker API access token |
+| `HUBITAT_EVENT_URL` | Full URL of the Hubitat app event endpoint (shown in app setup page) |
+| `HUBITAT_ACCESS_TOKEN` | Access token generated by the Hubitat app on first install |
 | `BRIDGE_PORT` | Port for this bridge server (default: 3000) |
 
 Optional:
 
 | Variable | Description |
 |---|---|
-| `POLL_INTERVAL_MS` | Fallback polling interval if WebSocket drops (default: 30000) |
 | `LOG_LEVEL` | `debug` \| `info` \| `warn` \| `error` (default: `info`) |
 
 ---
@@ -234,7 +254,7 @@ Optional:
 - TypeScript strict mode (`"strict": true` in tsconfig)
 - No `any` — use proper Ring SDK types or define local interfaces
 - All Ring event subscriptions must handle reconnect: if the Ring WebSocket drops, re-subscribe after exponential backoff (max 5 retries, then alert via log)
-- Hubitat Maker API calls: retry once on network error, then log and continue (never block the event loop)
+- Bridge → Hubitat HTTP calls: retry once on network error, then log and continue (never block the event loop)
 - Groovy drivers: keep all network calls in `asynchttpGet`/`asynchttpPost` — never synchronous HTTP in a driver
 - Each Groovy driver file must declare `author`, `version`, and `description` in its definition block
 - Version Groovy files as `1.0.0`, incrementing patch for bug fixes, minor for new attributes/commands
@@ -259,5 +279,5 @@ Lock user attribution follows a similar pattern via `location.getHistory()` filt
 - Ring has no official API — `ring-client-api` may break when Ring updates their backend
 - Lock user attribution requires a history API call after each event (adds ~500 ms latency)
 - Ring cameras do not support live video streaming through this integration (only motion events)
-- Hubitat Maker API requires the bridge to be on the same LAN; remote access is out of scope
+- The bridge must be on the same LAN as the Hubitat hub; remote access is out of scope
 - Ring 2FA is required on first auth; the refresh token persists until revoked or expired (~1 year)
