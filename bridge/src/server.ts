@@ -43,6 +43,12 @@ app.post('/devices/:id/unlock', (req: Request, res: Response) => {
 // ── Alarm commands ────────────────────────────────────────────────────────────
 
 app.post('/devices/:id/arm', async (req: Request, res: Response) => {
+  if (!config.alarmControl) {
+    log.warn('Arm command blocked — ALARM_CONTROL=false (view-only mode)');
+    res.status(403).json({ error: 'Alarm control is disabled (ALARM_CONTROL=false)' });
+    return;
+  }
+
   const location = locationStore.get(req.params.id);
   if (!location) { res.status(404).json({ error: 'Location not found' }); return; }
 
@@ -63,6 +69,12 @@ app.post('/devices/:id/arm', async (req: Request, res: Response) => {
 });
 
 app.post('/devices/:id/disarm', async (req: Request, res: Response) => {
+  if (!config.alarmControl) {
+    log.warn('Disarm command blocked — ALARM_CONTROL=false (view-only mode)');
+    res.status(403).json({ error: 'Alarm control is disabled (ALARM_CONTROL=false)' });
+    return;
+  }
+
   const location = locationStore.get(req.params.id);
   if (!location) { res.status(404).json({ error: 'Location not found' }); return; }
 
