@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import path from 'path';
 import { config } from '../config';
 import { DeviceInfo } from './devices';
-import { handleAlarmMode, handleContact, handleDing, handleLightLevel, handleLightOn, handleLockData, handleMotion } from './eventHandlers';
+import { handleAlarmMode, handleContact, handleDing, handleLightLevel, handleLightOn, handleLockData, handleMotion, handleMotionSensor } from './eventHandlers';
 import { log } from '../logger';
 
 // Ring Bridge-connected light device types
@@ -210,7 +210,12 @@ function subscribeCamera(camera: RingCamera, locationId: string): void {
   }
 }
 
-// ── Alarm devices (contact sensors, locks) ────────────────────────────────────
+// ── Alarm devices (contact sensors, motion sensors, locks) ───────────────────
+
+const MOTION_SENSOR_TYPES = new Set<RingDeviceType>([
+  RingDeviceType.MotionSensor,
+  RingDeviceType.BeamsMotionSensor,
+]);
 
 function subscribeAlarmDevice(device: RingDevice, location: RingLocation): void {
   if (device.deviceType === RingDeviceType.ContactSensor) {
@@ -227,6 +232,27 @@ function subscribeAlarmDevice(device: RingDevice, location: RingLocation): void 
         if (data.faulted !== undefined) await handleContact(device, data.faulted);
       },
       `contact:${device.name}`,
+    );
+
+  } else if (MOTION_SENSOR_TYPES.has(device.deviceType)) {
+    discoveredDevices.push({
+      id: device.id,
+      name: device.name,
+      type: 'motion-sensor',
+      locationId: location.id,
+    });
+
+    let lastMotionStatus: string | undefined;
+    subscribeWithRetry(
+      device.onData,
+      async (data: RingDeviceData) => {
+        const status = data.motionStatus;
+        if (status !== undefined && status !== lastMotionStatus) {
+          lastMotionStatus = status;
+          await handleMotionSensor(device, status);
+        }
+      },
+      `motion-sensor:${device.name}`,
     );
 
   } else if (device.categoryId === RingDeviceCategory.Locks) {

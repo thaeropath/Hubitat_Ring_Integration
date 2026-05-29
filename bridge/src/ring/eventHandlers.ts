@@ -35,6 +35,14 @@ export async function handleDing(camera: RingCamera): Promise<void> {
   log.info(`Ding "${camera.name}"`);
 }
 
+// ── Motion sensor (alarm hub PIR) ─────────────────────────────────────────────
+
+export async function handleMotionSensor(device: RingDevice, motionStatus: string): Promise<void> {
+  const value = motionStatus === 'faulted' ? 'active' : 'inactive';
+  await sendEvent({ deviceId: device.id, type: 'motion', value });
+  log.info(`Motion sensor "${device.name}" → ${value}`);
+}
+
 // ── Contact sensor ────────────────────────────────────────────────────────────
 
 export async function handleContact(device: RingDevice, faulted: boolean): Promise<void> {
