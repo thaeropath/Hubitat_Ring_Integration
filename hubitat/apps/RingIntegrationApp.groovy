@@ -224,6 +224,7 @@ private String driverForType(String type) {
         case "camera":         return "Ring Motion Camera"
         case "doorbell":       return "Ring Motion Camera"
         case "contact-sensor": return "Ring Contact Sensor"
+        case "motion-sensor":  return "Ring Motion Sensor"
         case "alarm":          return "Ring Alarm Controller"
         case "lock":           return "Ring Lock"
         case "light":          return "Ring Smart Light"

@@ -1,4 +1,4 @@
-export type RingDeviceKind = 'camera' | 'doorbell' | 'contact-sensor' | 'alarm' | 'lock' | 'light';
+export type RingDeviceKind = 'camera' | 'doorbell' | 'contact-sensor' | 'motion-sensor' | 'alarm' | 'lock' | 'light';
 
 export interface DeviceInfo {
   id: string;
