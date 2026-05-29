@@ -307,7 +307,7 @@ function subscribeAlarmDevice(device: RingDevice, location: RingLocation): void 
       `contact:${device.name}`,
     );
 
-  } else if (MOTION_SENSOR_TYPES.has(device.deviceType)) {
+  } else if (MOTION_SENSOR_TYPES.has(device.deviceType) || device.categoryId === RingDeviceCategory.SensorsMotion) {
     discoveredDevices.push({
       id: device.id,
       name: device.name,
@@ -344,6 +344,8 @@ function subscribeAlarmDevice(device: RingDevice, location: RingLocation): void 
       },
       `lock:${device.name}`,
     );
+  } else {
+    log.debug(`Skipping unsupported alarm device "${device.name}" — type=${device.deviceType} categoryId=${device.categoryId}`);
   }
 }
 
