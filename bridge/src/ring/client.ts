@@ -319,7 +319,12 @@ function subscribeAlarmDevice(device: RingDevice, location: RingLocation): void 
     subscribeWithRetry(
       device.onData,
       async (data: RingDeviceData) => {
-        const status = data.motionStatus;
+        // Alarm hub PIR sensors (sensor.motion, categoryId=5) report via faulted boolean,
+        // same as contact sensors. Beams sensors use the motionStatus string instead.
+        const statusFromFaulted = data.faulted !== undefined
+          ? (data.faulted ? 'faulted' : 'clear')
+          : undefined;
+        const status = data.motionStatus ?? statusFromFaulted;
         if (status !== undefined && status !== lastMotionStatus) {
           lastMotionStatus = status;
           await handleMotionSensor(device, status);
