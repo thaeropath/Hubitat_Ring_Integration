@@ -3,13 +3,17 @@ metadata {
         name:        "Ring Alarm Controller",
         namespace:   "hubitat_ring",
         author:      "Todd",
-        description: "Ring Alarm — arm/disarm with user attribution",
-        version:     "1.0.0",
+        description: "Ring Alarm — mode status (armed away / armed home / disarmed) with optional arm/disarm",
+        version:     "1.1.0",
     ) {
-        capability "SecurityKeypad"     // securityKeypad: armed away | armed home | disarmed
+        attribute "securityKeypad", "string"   // armed away | armed home | disarmed
 
         attribute "lastUser",  "string"
         attribute "lastEvent", "string"
+
+        command "armAway"
+        command "armHome"
+        command "disarm"
     }
 }
 
@@ -20,16 +24,18 @@ def initialize() {
     sendEvent(name: "securityKeypad", value: "disarmed")
 }
 
-// SecurityKeypad commands — delegate to parent app → bridge
+// Arm/disarm commands — delegate to parent app → bridge.
+// The bridge enforces ALARM_CONTROL; if set to false it returns 403
+// and logs a warning without changing the alarm state.
 
-def armAway(String pinCode = null) {
+def armAway() {
     parent.sendBridgeCommand(device.deviceNetworkId, "arm", [mode: "away"])
 }
 
-def armHome(String pinCode = null) {
+def armHome() {
     parent.sendBridgeCommand(device.deviceNetworkId, "arm", [mode: "home"])
 }
 
-def disarm(String pinCode = null) {
+def disarm() {
     parent.sendBridgeCommand(device.deviceNetworkId, "disarm", [:])
 }

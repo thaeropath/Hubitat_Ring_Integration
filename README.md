@@ -12,7 +12,7 @@ Connects Ring cameras, sensors, alarm, locks, and smart lights to a Hubitat Elev
 | Door lock | locked / unlocked + who triggered | lock, unlock |
 | Smart light (via Ring Bridge) | on/off, brightness level | on, off, set level |
 
-Events arrive in real time via Ring's WebSocket push — the same channel the Ring app uses. No polling required.
+Alarm hub events (sensors, locks, alarm mode) arrive in real time via Ring's WebSocket push. Camera motion and doorbell ding are delivered by polling Ring's event history API every 20 seconds.
 
 ## How it works
 
@@ -57,6 +57,7 @@ The token is valid until you revoke it or Ring expires it (~1 year). You only ne
 1. In Hubitat UI, go to **Drivers Code → + New Driver** and paste each file:
    - `hubitat/drivers/RingMotionCamera.groovy`
    - `hubitat/drivers/RingContactSensor.groovy`
+   - `hubitat/drivers/RingMotionSensor.groovy`
    - `hubitat/drivers/RingAlarmController.groovy`
    - `hubitat/drivers/RingLock.groovy`
    - `hubitat/drivers/RingSmartLight.groovy`
@@ -94,6 +95,13 @@ HUBITAT_ACCESS_TOKEN=<token from Hubitat app setup page>
 BRIDGE_PORT=3000
 LOG_LEVEL=info
 ```
+
+**Optional variables** (add only if you need them):
+
+| Variable | Default | Description |
+|---|---|---|
+| `ALARM_CONTROL` | `true` | Set to `false` to make the Ring Alarm read-only from Hubitat. Arm/disarm commands from Hubitat will be blocked; the alarm mode is still reported. |
+| `LOG_LEVEL` | `info` | Set to `debug` to see every discovered device type — useful when sensors or lights are missing. |
 
 ---
 

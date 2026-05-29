@@ -196,31 +196,17 @@ function subscribeCamera(camera: RingCamera, locationId: string): void {
     locationId,
   });
 
-  // FCM push subscription (works when Ring cloud push reaches the bridge)
-  subscribeWithRetry(
-    camera.onMotionDetected,
-    active => handleMotion(camera, active),
-    `motion:${camera.name}`,
-  );
-
-  // REST polling fallback — covers environments where FCM push is blocked
   startCameraMotionPoller(camera);
 
   if (doorbell) {
-    subscribeWithRetry(
-      camera.onDoorbellPressed,
-      () => handleDing(camera),
-      `ding:${camera.name}`,
-    );
     startCameraDingPoller(camera);
   }
 }
 
 // ── Camera motion/ding REST polling ──────────────────────────────────────────
-// ring-client-api v14 delivers camera events via FCM push notifications which
-// require outbound TCP to mtalk.google.com:5228. In environments where that
-// port is blocked the push channel is silent. As a reliable fallback we poll
-// camera.getEvents() (Ring's REST history API) every 20 seconds.
+// Camera events are delivered by polling camera.getEvents() (Ring's REST history
+// API) every 20 seconds. ring-client-api v14 also provides an FCM push channel
+// but it requires specific firewall rules and is unreliable in many environments.
 
 const CAMERA_POLL_MS             = 20_000;
 const CAMERA_MOTION_INACTIVE_MS  = 30_000;
@@ -262,11 +248,6 @@ async function pollCameraDing(camera: RingCamera): Promise<void> {
 }
 
 function startCameraMotionPoller(camera: RingCamera): void {
-  if (!config.cameraPolling) {
-    log.info(`Camera "${camera.name}": motion polling disabled (CAMERA_POLLING=false) — using FCM push only`);
-    return;
-  }
-
   camera.getEvents({ limit: 1, kind: 'motion' })
     .then(result => {
       const events: CameraEvent[] = result.events ?? [];
@@ -285,8 +266,6 @@ function startCameraMotionPoller(camera: RingCamera): void {
 }
 
 function startCameraDingPoller(camera: RingCamera): void {
-  if (!config.cameraPolling) return;
-
   camera.getEvents({ limit: 1, kind: 'ding' })
     .then(result => {
       const events: CameraEvent[] = result.events ?? [];
