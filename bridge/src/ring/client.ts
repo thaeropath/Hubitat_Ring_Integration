@@ -7,39 +7,6 @@ import { DeviceInfo } from './devices';
 import { handleAlarmMode, handleContact, handleDing, handleLightLevel, handleLightOn, handleLockData, handleMotion } from './eventHandlers';
 import { log } from '../logger';
 
-// Route ring-client-api internal logs through our logger so we can see
-// the socket.io host, connection errors, and other internal details.
-// Use an absolute file path to bypass Node 12+ package exports restrictions.
-/* eslint-disable @typescript-eslint/no-require-imports */
-const ringLibDir = path.dirname(require.resolve('ring-client-api'));
-const { useLogger } = require(path.join(ringLibDir, 'util')) as {
-  useLogger: (l: { logInfo: (...a: unknown[]) => void; logError: (...a: unknown[]) => void }) => void;
-};
-/* eslint-enable @typescript-eslint/no-require-imports */
-useLogger({
-  logInfo:  (...args) => log.info(`[ring] ${args.join(' ')}`),
-  logError: (...args) => log.warn(`[ring] ${args.join(' ')}`),
-});
-
-// Intercept socket.io-client to log the WSS host ring-client-api is connecting to.
-// This module is already loaded at this point (ring-client-api imports it), so we
-// wrap the cached export — ring-client-api will call our wrapper.
-/* eslint-disable @typescript-eslint/no-require-imports */
-const sio = require('socket.io-client') as { connect: (...args: unknown[]) => unknown };
-const _origSioConnect = sio.connect.bind(sio);
-sio.connect = (url: unknown, ...rest: unknown[]) => {
-  if (typeof url === 'string') {
-    try {
-      const { hostname, port } = new URL(url);
-      log.info(`[socket.io] Connecting → ${hostname}:${port || 443}`);
-    } catch {
-      log.info(`[socket.io] Connecting → ${String(url).split('?')[0]}`);
-    }
-  }
-  return _origSioConnect(url, ...rest);
-};
-/* eslint-enable @typescript-eslint/no-require-imports */
-
 // Ring Bridge-connected light device types
 const LIGHT_DEVICE_TYPES = new Set<RingDeviceType>([
   RingDeviceType.MultiLevelSwitch,
