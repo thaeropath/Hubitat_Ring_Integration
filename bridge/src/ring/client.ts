@@ -131,6 +131,7 @@ function subscribeLocation(location: RingLocation): void {
     }
     if (added > 0) {
       log.info(`"${location.name}": loaded ${added} new alarm device(s) (bridge total: ${discoveredDevices.length})`);
+      log.info(`✔ Ready for Hubitat device discovery — tap "Discover Ring Devices" now`);
     }
   };
 
