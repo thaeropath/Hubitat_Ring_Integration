@@ -1,4 +1,4 @@
-import { Location as RingLocation, RingApi, RingCamera, RingDevice, RingDeviceCategory, RingDeviceData, RingDeviceType } from 'ring-client-api';
+import { type CameraEvent, Location as RingLocation, RingApi, RingCamera, RingDevice, RingDeviceCategory, RingDeviceData, RingDeviceType } from 'ring-client-api';
 import type { Observable } from 'rxjs';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import path from 'path';
@@ -195,11 +195,15 @@ function subscribeCamera(camera: RingCamera, locationId: string): void {
     locationId,
   });
 
+  // FCM push subscription (works when Ring cloud push reaches the bridge)
   subscribeWithRetry(
     camera.onMotionDetected,
     active => handleMotion(camera, active),
     `motion:${camera.name}`,
   );
+
+  // REST polling fallback — covers environments where FCM push is blocked
+  startCameraMotionPoller(camera);
 
   if (doorbell) {
     subscribeWithRetry(
@@ -207,7 +211,89 @@ function subscribeCamera(camera: RingCamera, locationId: string): void {
       () => handleDing(camera),
       `ding:${camera.name}`,
     );
+    startCameraDingPoller(camera);
   }
+}
+
+// ── Camera motion/ding REST polling ──────────────────────────────────────────
+// ring-client-api v14 delivers camera events via FCM push notifications which
+// require outbound TCP to mtalk.google.com:5228. In environments where that
+// port is blocked the push channel is silent. As a reliable fallback we poll
+// camera.getEvents() (Ring's REST history API) every 20 seconds.
+
+const CAMERA_POLL_MS             = 20_000;
+const CAMERA_MOTION_INACTIVE_MS  = 30_000;
+
+const cameraLastMotionId = new Map<number, string>();
+const cameraMotionTimers = new Map<number, ReturnType<typeof setTimeout>>();
+const cameraLastDingId   = new Map<number, string>();
+
+async function pollCameraMotion(camera: RingCamera): Promise<void> {
+  const result = await camera.getEvents({ limit: 5, kind: 'motion' });
+  const events: CameraEvent[] = result.events ?? [];
+  if (!events.length) return;
+
+  const latest = events[0];
+  if (latest.ding_id_str === cameraLastMotionId.get(camera.id)) return;
+  cameraLastMotionId.set(camera.id, latest.ding_id_str);
+
+  await handleMotion(camera, true);
+
+  const existing = cameraMotionTimers.get(camera.id);
+  if (existing) clearTimeout(existing);
+  const timer = setTimeout(async () => {
+    cameraMotionTimers.delete(camera.id);
+    await handleMotion(camera, false);
+  }, CAMERA_MOTION_INACTIVE_MS);
+  cameraMotionTimers.set(camera.id, timer);
+}
+
+async function pollCameraDing(camera: RingCamera): Promise<void> {
+  const result = await camera.getEvents({ limit: 5, kind: 'ding' });
+  const events: CameraEvent[] = result.events ?? [];
+  if (!events.length) return;
+
+  const latest = events[0];
+  if (latest.ding_id_str === cameraLastDingId.get(camera.id)) return;
+  cameraLastDingId.set(camera.id, latest.ding_id_str);
+
+  await handleDing(camera);
+}
+
+function startCameraMotionPoller(camera: RingCamera): void {
+  camera.getEvents({ limit: 1, kind: 'motion' })
+    .then(result => {
+      const events: CameraEvent[] = result.events ?? [];
+      if (events.length) {
+        cameraLastMotionId.set(camera.id, events[0].ding_id_str);
+        log.debug(`Camera "${camera.name}": motion poll seeded — last event ${events[0].created_at}`);
+      }
+    })
+    .catch(err => log.warn(`Camera "${camera.name}": motion seed failed: ${err}`));
+
+  setInterval(() => {
+    pollCameraMotion(camera).catch(err =>
+      log.error(`Motion poll error for "${camera.name}": ${err}`),
+    );
+  }, CAMERA_POLL_MS);
+}
+
+function startCameraDingPoller(camera: RingCamera): void {
+  camera.getEvents({ limit: 1, kind: 'ding' })
+    .then(result => {
+      const events: CameraEvent[] = result.events ?? [];
+      if (events.length) {
+        cameraLastDingId.set(camera.id, events[0].ding_id_str);
+        log.debug(`Camera "${camera.name}": ding poll seeded — last event ${events[0].created_at}`);
+      }
+    })
+    .catch(err => log.warn(`Camera "${camera.name}": ding seed failed: ${err}`));
+
+  setInterval(() => {
+    pollCameraDing(camera).catch(err =>
+      log.error(`Ding poll error for "${camera.name}": ${err}`),
+    );
+  }, CAMERA_POLL_MS);
 }
 
 // ── Alarm devices (contact sensors, motion sensors, locks) ───────────────────
