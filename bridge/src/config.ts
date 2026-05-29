@@ -14,4 +14,5 @@ export const config = {
   bridgePort:          parseInt(process.env.BRIDGE_PORT ?? '3000', 10),
   logLevel:            (process.env.LOG_LEVEL ?? 'info') as 'debug' | 'info' | 'warn' | 'error',
   tokenFile:           process.env.TOKEN_FILE ?? '/home/node/ring-token.txt',
+  cameraPolling:       process.env.CAMERA_POLLING !== 'false',
 } as const;

@@ -262,6 +262,11 @@ async function pollCameraDing(camera: RingCamera): Promise<void> {
 }
 
 function startCameraMotionPoller(camera: RingCamera): void {
+  if (!config.cameraPolling) {
+    log.info(`Camera "${camera.name}": motion polling disabled (CAMERA_POLLING=false) — using FCM push only`);
+    return;
+  }
+
   camera.getEvents({ limit: 1, kind: 'motion' })
     .then(result => {
       const events: CameraEvent[] = result.events ?? [];
@@ -280,6 +285,8 @@ function startCameraMotionPoller(camera: RingCamera): void {
 }
 
 function startCameraDingPoller(camera: RingCamera): void {
+  if (!config.cameraPolling) return;
+
   camera.getEvents({ limit: 1, kind: 'ding' })
     .then(result => {
       const events: CameraEvent[] = result.events ?? [];
