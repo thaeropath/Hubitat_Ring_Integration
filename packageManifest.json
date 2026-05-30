@@ -6,7 +6,7 @@
   "dateReleased": "2026-05-30",
   "releaseNotes": "Initial public release. Supports Ring cameras, doorbells, contact sensors, alarm hub motion sensors, alarm arm/disarm, door locks, and Ring Bridge smart lights.",
   "documentationLink": "https://github.com/thaeropath/Hubitat_Ring_Integration",
-  "communityLink": "",
+  "communityLink": "https://community.hubitat.com/t/release-ring-integration-with-real-time-motion-alerts-ring-bridge-ring-alarm/164340?u=todd8",
   "apps": [
     {
       "id": "619c470c-e726-4650-a49f-1dc6a4fe792d",
