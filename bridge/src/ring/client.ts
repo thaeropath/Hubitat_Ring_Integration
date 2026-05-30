@@ -196,24 +196,78 @@ function subscribeCamera(camera: RingCamera, locationId: string): void {
     locationId,
   });
 
-  startCameraMotionPoller(camera);
+  if (config.cameraPush) {
+    // FCM push: fires immediately when Ring cloud delivers the notification.
+    // On active=true we seed the polling dedup (with a short delay to let the
+    // REST history catch up to the push) so polling doesn't re-fire the same event.
+    // On active=false we cancel the polling inactive timer since push gave us the end.
+    subscribeWithRetry(
+      camera.onMotionDetected,
+      async (active: boolean) => {
+        await handleMotion(camera, active);
+        if (active) {
+          setTimeout(() => seedMotionPoller(camera), 5_000);
+        } else {
+          const t = cameraMotionTimers.get(camera.id);
+          if (t) { clearTimeout(t); cameraMotionTimers.delete(camera.id); }
+        }
+      },
+      `motion-push:${camera.name}`,
+    );
 
-  if (doorbell) {
-    startCameraDingPoller(camera);
+    if (doorbell) {
+      subscribeWithRetry(
+        camera.onDoorbellPressed,
+        async () => {
+          await handleDing(camera);
+          setTimeout(() => seedDingPoller(camera), 5_000);
+        },
+        `ding-push:${camera.name}`,
+      );
+    }
+  }
+
+  if (config.cameraPolling) {
+    startCameraMotionPoller(camera);
+    if (doorbell) startCameraDingPoller(camera);
   }
 }
 
-// ── Camera motion/ding REST polling ──────────────────────────────────────────
-// Camera events are delivered by polling camera.getEvents() (Ring's REST history
-// API) every 20 seconds. ring-client-api v14 also provides an FCM push channel
-// but it requires specific firewall rules and is unreliable in many environments.
+// ── Camera motion/ding polling + push deduplication ──────────────────────────
+// Push fires immediately; polling runs every 20 s as a fallback.
+// Both are independently toggled by CAMERA_PUSH / CAMERA_POLLING in .env.
+// The seed functions keep the two in sync so they never fire the same event twice.
 
-const CAMERA_POLL_MS             = 20_000;
-const CAMERA_MOTION_INACTIVE_MS  = 30_000;
+const CAMERA_POLL_MS            = 20_000;
+const CAMERA_MOTION_INACTIVE_MS = 30_000;
 
 const cameraLastMotionId = new Map<number, string>();
 const cameraMotionTimers = new Map<number, ReturnType<typeof setTimeout>>();
 const cameraLastDingId   = new Map<number, string>();
+
+function seedMotionPoller(camera: RingCamera): void {
+  camera.getEvents({ limit: 1, kind: 'motion' })
+    .then(result => {
+      const events: CameraEvent[] = result.events ?? [];
+      if (events.length) {
+        cameraLastMotionId.set(camera.id, events[0].ding_id_str);
+        log.debug(`Camera "${camera.name}": motion poll seeded — last event ${events[0].created_at}`);
+      }
+    })
+    .catch(err => log.warn(`Camera "${camera.name}": motion seed failed: ${err}`));
+}
+
+function seedDingPoller(camera: RingCamera): void {
+  camera.getEvents({ limit: 1, kind: 'ding' })
+    .then(result => {
+      const events: CameraEvent[] = result.events ?? [];
+      if (events.length) {
+        cameraLastDingId.set(camera.id, events[0].ding_id_str);
+        log.debug(`Camera "${camera.name}": ding poll seeded — last event ${events[0].created_at}`);
+      }
+    })
+    .catch(err => log.warn(`Camera "${camera.name}": ding seed failed: ${err}`));
+}
 
 async function pollCameraMotion(camera: RingCamera): Promise<void> {
   const result = await camera.getEvents({ limit: 5, kind: 'motion' });
@@ -248,16 +302,7 @@ async function pollCameraDing(camera: RingCamera): Promise<void> {
 }
 
 function startCameraMotionPoller(camera: RingCamera): void {
-  camera.getEvents({ limit: 1, kind: 'motion' })
-    .then(result => {
-      const events: CameraEvent[] = result.events ?? [];
-      if (events.length) {
-        cameraLastMotionId.set(camera.id, events[0].ding_id_str);
-        log.debug(`Camera "${camera.name}": motion poll seeded — last event ${events[0].created_at}`);
-      }
-    })
-    .catch(err => log.warn(`Camera "${camera.name}": motion seed failed: ${err}`));
-
+  seedMotionPoller(camera);
   setInterval(() => {
     pollCameraMotion(camera).catch(err =>
       log.error(`Motion poll error for "${camera.name}": ${err}`),
@@ -266,16 +311,7 @@ function startCameraMotionPoller(camera: RingCamera): void {
 }
 
 function startCameraDingPoller(camera: RingCamera): void {
-  camera.getEvents({ limit: 1, kind: 'ding' })
-    .then(result => {
-      const events: CameraEvent[] = result.events ?? [];
-      if (events.length) {
-        cameraLastDingId.set(camera.id, events[0].ding_id_str);
-        log.debug(`Camera "${camera.name}": ding poll seeded — last event ${events[0].created_at}`);
-      }
-    })
-    .catch(err => log.warn(`Camera "${camera.name}": ding seed failed: ${err}`));
-
+  seedDingPoller(camera);
   setInterval(() => {
     pollCameraDing(camera).catch(err =>
       log.error(`Ding poll error for "${camera.name}": ${err}`),

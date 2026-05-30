@@ -15,4 +15,6 @@ export const config = {
   logLevel:            (process.env.LOG_LEVEL ?? 'info') as 'debug' | 'info' | 'warn' | 'error',
   tokenFile:           process.env.TOKEN_FILE ?? '/home/node/ring-token.txt',
   alarmControl:        process.env.ALARM_CONTROL !== 'false',
+  cameraPush:          process.env.CAMERA_PUSH    !== 'false',
+  cameraPolling:       process.env.CAMERA_POLLING !== 'false',
 } as const;

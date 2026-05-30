@@ -6,6 +6,7 @@ definition(
     category:    "Security",
     iconUrl:     "",
     iconX2Url:   "",
+    version:        "1.1.0",
     singleInstance: true,
     oauth:          true,
 )
@@ -35,16 +36,28 @@ def mainPage() {
             input "bridgePort", "number", title: "Bridge Port",        required: true, defaultValue: 3000
         }
 
-        section("Device Discovery") {
-            href "discoveryPage",
-                 title:       "Discover Ring Devices",
-                 description: "Tap to connect to the bridge and create Hubitat devices"
-        }
-
         section("Bridge Configuration") {
             paragraph """<b>Add these two lines to your bridge <code>.env</code> file:</b><br><br>
 <code>HUBITAT_EVENT_URL=${getFullLocalApiServerUrl()}/ring/event</code><br>
 <code>HUBITAT_ACCESS_TOKEN=${state.accessToken}</code>"""
+        }
+
+        section("Device Discovery") {
+            input "includeTypes", "enum",
+                title:        "Device types to import from Ring",
+                options:      [
+                    "cameras":        "Cameras & Doorbells",
+                    "contact-sensor": "Contact Sensors",
+                    "motion-sensor":  "Motion Sensors",
+                    "alarm":          "Alarm",
+                    "lock":           "Door Locks",
+                    "light":          "Smart Lights (Ring Bridge)",
+                ],
+                multiple:     true,
+                required:     false
+            href "discoveryPage",
+                 title:       "Discover Ring Devices",
+                 description: "Tap to connect to the bridge and create Hubitat devices"
         }
 
         if (getChildDevices()) {
@@ -185,6 +198,8 @@ private Map discoverRingDevices() {
 
     if (!devices) return [error: "Bridge returned empty device list"]
 
+    def selectedTypes = settings.includeTypes ?: ["cameras", "contact-sensor", "motion-sensor", "alarm", "lock", "light"]
+
     int added = 0, existing = 0
     def lines = []
 
@@ -196,6 +211,13 @@ private Map discoverRingDevices() {
 
         if (!dni || !name || !driver) {
             log.debug "Skipping unsupported device type: ${type}"
+            return
+        }
+
+        // cameras and doorbells share the "cameras" selection key
+        def typeKey = (type == "camera" || type == "doorbell") ? "cameras" : type
+        if (!selectedTypes.contains(typeKey)) {
+            log.debug "Skipping device type not selected for import: ${type}"
             return
         }
 
