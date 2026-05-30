@@ -1,0 +1,13 @@
+# Bridge — personal credentials (NEVER commit these)
+bridge/.env
+
+# Bridge — build output and dependencies
+bridge/node_modules/
+bridge/dist/
+
+# macOS
+.DS_Store
+
+# Editor
+.vscode/
+*.swp
