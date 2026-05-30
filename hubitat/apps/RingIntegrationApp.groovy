@@ -93,6 +93,7 @@ def installed() {
 
 def updated() {
     log.info "Ring Integration updated"
+    pruneDeselectedDevices()
 }
 
 def uninstalled() {
@@ -199,6 +200,7 @@ private Map discoverRingDevices() {
     if (!devices) return [error: "Bridge returned empty device list"]
 
     def selectedTypes = settings.includeTypes ?: ["cameras", "contact-sensor", "motion-sensor", "alarm", "lock", "light"]
+    if (!state.deviceTypes) state.deviceTypes = [:]
 
     int added = 0, existing = 0
     def lines = []
@@ -216,6 +218,10 @@ private Map discoverRingDevices() {
 
         // cameras and doorbells share the "cameras" selection key
         def typeKey = (type == "camera" || type == "doorbell") ? "cameras" : type
+
+        // Always record the type so pruning works even for pre-existing devices
+        state.deviceTypes[dni] = typeKey
+
         if (!selectedTypes.contains(typeKey)) {
             log.debug "Skipping device type not selected for import: ${type}"
             return
@@ -251,5 +257,32 @@ private String driverForType(String type) {
         case "lock":           return "Ring Lock"
         case "light":          return "Ring Smart Light"
         default:               return null
+    }
+}
+
+// Infer the selection-key from a driver name — fallback for devices created
+// before state.deviceTypes was introduced.
+private String typeKeyFromDriver(String driverName) {
+    switch (driverName) {
+        case "Ring Motion Camera":    return "cameras"
+        case "Ring Contact Sensor":   return "contact-sensor"
+        case "Ring Motion Sensor":    return "motion-sensor"
+        case "Ring Alarm Controller": return "alarm"
+        case "Ring Lock":             return "lock"
+        case "Ring Smart Light":      return "light"
+        default:                      return null
+    }
+}
+
+private void pruneDeselectedDevices() {
+    def selectedTypes = settings.includeTypes ?: ["cameras", "contact-sensor", "motion-sensor", "alarm", "lock", "light"]
+    def typeMap = state.deviceTypes ?: [:]
+
+    getChildDevices().each { dev ->
+        def typeKey = typeMap[dev.deviceNetworkId] ?: typeKeyFromDriver(dev.typeName)
+        if (typeKey && !selectedTypes.contains(typeKey)) {
+            log.info "Removing '${dev.label ?: dev.name}' — type '${typeKey}' no longer selected"
+            deleteChildDevice(dev.deviceNetworkId)
+        }
     }
 }
