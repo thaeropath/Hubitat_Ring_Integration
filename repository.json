@@ -1,0 +1,13 @@
+{
+  "author": "thaeropath",
+  "githubUrl": "https://github.com/thaeropath/Hubitat_Ring_Integration",
+  "payPalUrl": "",
+  "packages": [
+    {
+      "name": "Ring Integration",
+      "description": "Bridges Ring cameras, sensors, alarm system, door locks, and smart lights to Hubitat Elevation via a local Node.js bridge server. Real-time events via WebSocket push — no polling required for alarm hub devices.",
+      "location": "https://raw.githubusercontent.com/thaeropath/Hubitat_Ring_Integration/main/packageManifest.json",
+      "tags": ["Security"]
+    }
+  ]
+}
