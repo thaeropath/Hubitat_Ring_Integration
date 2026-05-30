@@ -101,6 +101,8 @@ LOG_LEVEL=info
 | Variable | Default | Description |
 |---|---|---|
 | `ALARM_CONTROL` | `true` | Set to `false` to make the Ring Alarm read-only from Hubitat. Arm/disarm commands from Hubitat will be blocked; the alarm mode is still reported. |
+| `CAMERA_PUSH` | `true` | Set to `false` to disable FCM push notifications for camera motion and doorbell ding. Use this if your network blocks `mtalk.google.com:5228`. |
+| `CAMERA_POLLING` | `true` | Set to `false` to disable REST polling for camera events. Only set this once push is confirmed working. |
 | `LOG_LEVEL` | `info` | Set to `debug` to see every discovered device type — useful when sensors or lights are missing. |
 
 ---

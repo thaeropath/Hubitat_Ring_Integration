@@ -1,0 +1,64 @@
+{
+  "packageName": "Ring Integration",
+  "minimumHEVersion": "2.3.0",
+  "author": "Todd",
+  "version": "1.1.0",
+  "dateReleased": "2026-05-30",
+  "releaseNotes": "Initial public release. Supports Ring cameras, doorbells, contact sensors, alarm hub motion sensors, alarm arm/disarm, door locks, and Ring Bridge smart lights.",
+  "documentationLink": "https://github.com/thaeropath/Hubitat_Ring_Integration",
+  "communityLink": "",
+  "apps": [
+    {
+      "id": "619c470c-e726-4650-a49f-1dc6a4fe792d",
+      "name": "Ring Integration",
+      "namespace": "hubitat_ring",
+      "location": "https://raw.githubusercontent.com/thaeropath/Hubitat_Ring_Integration/main/hubitat/apps/RingIntegrationApp.groovy",
+      "required": true,
+      "oauth": true
+    }
+  ],
+  "drivers": [
+    {
+      "id": "9cd91b64-e219-486b-a176-7872413e66cc",
+      "name": "Ring Motion Camera",
+      "namespace": "hubitat_ring",
+      "location": "https://raw.githubusercontent.com/thaeropath/Hubitat_Ring_Integration/main/hubitat/drivers/RingMotionCamera.groovy",
+      "required": true
+    },
+    {
+      "id": "a2cd3353-88c5-42cc-9d37-8068e0279c66",
+      "name": "Ring Contact Sensor",
+      "namespace": "hubitat_ring",
+      "location": "https://raw.githubusercontent.com/thaeropath/Hubitat_Ring_Integration/main/hubitat/drivers/RingContactSensor.groovy",
+      "required": true
+    },
+    {
+      "id": "56209c00-bfe7-4d4e-9801-08de37ce4b35",
+      "name": "Ring Motion Sensor",
+      "namespace": "hubitat_ring",
+      "location": "https://raw.githubusercontent.com/thaeropath/Hubitat_Ring_Integration/main/hubitat/drivers/RingMotionSensor.groovy",
+      "required": true
+    },
+    {
+      "id": "dc2ff352-7f47-429b-b9f5-9335ac688be4",
+      "name": "Ring Alarm Controller",
+      "namespace": "hubitat_ring",
+      "location": "https://raw.githubusercontent.com/thaeropath/Hubitat_Ring_Integration/main/hubitat/drivers/RingAlarmController.groovy",
+      "required": true
+    },
+    {
+      "id": "0dac0a1b-6f18-42b2-be08-55be87635bda",
+      "name": "Ring Lock",
+      "namespace": "hubitat_ring",
+      "location": "https://raw.githubusercontent.com/thaeropath/Hubitat_Ring_Integration/main/hubitat/drivers/RingLock.groovy",
+      "required": true
+    },
+    {
+      "id": "6f75e72b-9821-4d8a-81dc-2c17f89658bd",
+      "name": "Ring Smart Light",
+      "namespace": "hubitat_ring",
+      "location": "https://raw.githubusercontent.com/thaeropath/Hubitat_Ring_Integration/main/hubitat/drivers/RingSmartLight.groovy",
+      "required": true
+    }
+  ]
+}
