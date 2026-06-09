@@ -1,4 +1,5 @@
 import express, { Request, Response } from 'express';
+import type { RingDevice } from 'ring-client-api';
 import { config } from './config';
 import { discoveredDevices, lightStore, locationStore, lockStore } from './ring/client';
 import { log } from './logger';
@@ -88,14 +89,39 @@ app.post('/devices/:id/disarm', async (req: Request, res: Response) => {
   }
 });
 
+// ── Smart Light helpers ───────────────────────────────────────────────────────
+// Ring Beams/Bridge lights use the 'light-mode.set' alarm hub command.
+// Z-wave multi-level switches on the alarm hub use setInfo with device.v1.
+// Ring's level field is 0-1 (not 0-100); we convert from Hubitat's 0-100.
+
+function isBeams(device: RingDevice): boolean {
+  return (device.deviceType as string).includes('beams');
+}
+
+function lightSetOn(device: RingDevice, on: boolean): void {
+  if (isBeams(device)) {
+    device.sendCommand('light-mode.set', on ? { lightMode: 'on' } : { lightMode: 'default' });
+  } else {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (device as any).setInfo({ device: { v1: { on } } });
+  }
+}
+
+function lightSetLevel(device: RingDevice, hubLevel: number): void {
+  if (isBeams(device)) {
+    device.sendCommand('light-mode.set', { lightMode: hubLevel > 0 ? 'on' : 'default' });
+  }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (device as any).setInfo({ device: { v1: { level: hubLevel / 100 } } });
+}
+
 // ── Smart Light commands ──────────────────────────────────────────────────────
-// sendCommand() is fire-and-forget; state confirmation arrives via onData push.
 
 app.post('/devices/:id/on', (req: Request, res: Response) => {
   const device = lightStore.get(req.params.id);
   if (!device) { res.status(404).json({ error: 'Device not found' }); return; }
 
-  device.sendCommand('set', { on: true });
+  lightSetOn(device, true);
   log.info(`Light on: "${device.name}"`);
   res.json({ ok: true });
 });
@@ -104,7 +130,7 @@ app.post('/devices/:id/off', (req: Request, res: Response) => {
   const device = lightStore.get(req.params.id);
   if (!device) { res.status(404).json({ error: 'Device not found' }); return; }
 
-  device.sendCommand('set', { on: false });
+  lightSetOn(device, false);
   log.info(`Light off: "${device.name}"`);
   res.json({ ok: true });
 });
@@ -119,7 +145,7 @@ app.post('/devices/:id/setLevel', (req: Request, res: Response) => {
     return;
   }
 
-  device.sendCommand('set', { on: level > 0, level });
+  lightSetLevel(device, level);
   log.info(`Light level ${level}%: "${device.name}"`);
   res.json({ ok: true });
 });
