@@ -111,6 +111,8 @@ LOG_LEVEL=info
 
 ## Step 4 — Deploy the bridge
 
+**Before you deploy:** assign your bridge host a static IP (or a DHCP reservation in your router) so its address never changes. Hubitat stores the bridge IP at setup time — if it changes, commands from Hubitat stop reaching the bridge. Most routers let you reserve an IP by MAC address under DHCP settings. Note: if your machine has **Private/Random MAC address** (a privacy feature on macOS, iOS, and some Linux distros), disable it for the interface connected to your LAN, or the reservation won't hold after a reconnect.
+
 Choose one option:
 
 ### Option A — Docker (Raspberry Pi with Docker, or NAS)
@@ -232,6 +234,9 @@ After pasting the app code in Apps Code, click the **OAuth** button at the top o
 
 **Ring refresh token expired or invalid**
 Re-run `npx ring-auth-cli`, paste the new token into `.env` as `RING_REFRESH_TOKEN`, and restart the bridge. After that the bridge handles all future rotations automatically.
+
+**Commands from Hubitat stop working after bridge restart or network change**
+The most common cause is that the bridge host's IP address changed. Hubitat stores the IP at setup time and won't discover a new one automatically. Check the current IP of your bridge host, then update it in **Hubitat → Apps → Ring Integration → Bridge IP Address** and save. To prevent recurrence, set a static IP or DHCP reservation for the bridge host in your router. If your machine uses a **private/random MAC address** (a privacy feature on macOS and some Linux distros), disable it for the LAN interface — otherwise the MAC seen by your router changes and the reservation won't hold.
 
 **Events stop arriving after bridge restart**
 Check that `HUBITAT_EVENT_URL` and `HUBITAT_ACCESS_TOKEN` in `.env` still match the Hubitat app setup page. These values change if you uninstall and reinstall the Ring Integration app on Hubitat.
