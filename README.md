@@ -169,6 +169,39 @@ pm2 save && pm2 startup
 
 ---
 
+### Option D — Windows PC
+
+**With Docker:** install [Docker Desktop for Windows](https://docs.docker.com/desktop/setup/install/windows-install/) (Windows 10/11, WSL 2 backend — the installer sets it up). Then, from the `bridge` folder in PowerShell:
+
+```powershell
+docker compose up -d --build
+```
+
+**Without Docker:** install [Node.js 20 LTS](https://nodejs.org/), then from the `bridge` folder:
+
+```powershell
+npm install
+npm run build
+npm install -g pm2
+pm2 start dist/index.js --name ring-bridge
+pm2 save
+```
+
+`pm2 startup` doesn't work on Windows. To start the bridge on boot, use [pm2-installer](https://github.com/jessety/pm2-installer) or [NSSM](https://nssm.cc/) to run it as a Windows service.
+
+**Windows-specific setup:**
+
+- **Allow port 3000 through Windows Firewall.** Windows blocks incoming connections by default, so Hubitat can't reach the bridge until you add a rule. In an admin PowerShell window:
+  ```powershell
+  New-NetFirewallRule -DisplayName "Ring Bridge" -Direction Inbound -Protocol TCP -LocalPort 3000 -Action Allow
+  ```
+  If `curl http://localhost:3000/health` works on the PC but `http://<pc-ip>:3000/health` fails from another device, the firewall is the cause.
+- **Disable sleep.** Settings → System → Power → set sleep to **Never** when plugged in. A sleeping PC receives no events.
+- **Start Docker on boot** (Docker only). Docker Desktop → Settings → General → enable **Start Docker Desktop when you sign in**. Docker Desktop only starts after a user signs in, so the PC also needs to sign in automatically after a reboot.
+- **Turn off random hardware addresses** for Wi-Fi. Settings → Network & internet → Wi-Fi → your network → **Random hardware addresses: Off**. Otherwise your router's DHCP reservation won't hold. A wired connection avoids this.
+
+---
+
 ## Step 5 — Discover Ring devices in Hubitat
 
 1. Hubitat → **Apps → Ring Integration**
@@ -231,6 +264,7 @@ After pasting the app code in Apps Code, click the **OAuth** button at the top o
 - Confirm the bridge is running: `curl http://<bridge-ip>:3000/health`
 - Confirm the IP and port in the Hubitat app match your `.env`
 - Bridge and Hubitat hub must be on the same LAN segment
+- On Windows, allow inbound port 3000 through Windows Firewall (see Option D)
 
 **Ring refresh token expired or invalid**
 Re-run `npx ring-auth-cli`, paste the new token into `.env` as `RING_REFRESH_TOKEN`, and restart the bridge. After that the bridge handles all future rotations automatically.
